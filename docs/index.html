@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#c4622d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Kalorie" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <link rel="manifest" href="manifest.json" />
+    <title>Kalorie z fotky</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>🍽️ Kalorie z fotky</h1>
+      <p class="lead">
+        Vyfoť jídlo a získej odhad kalorií a makroživin. Běží celé v prohlížeči.
+      </p>
+
+      <details id="settings" class="settings">
+        <summary>🔑 API klíč</summary>
+        <p class="hint">
+          Klíč se uloží jen v tomhle prohlížeči (localStorage) a používá se pouze
+          pro přímé volání Anthropic API. Vytvoříš ho na
+          <a href="https://console.anthropic.com" target="_blank" rel="noopener"
+            >console.anthropic.com</a
+          >.
+        </p>
+        <div class="keyrow">
+          <input
+            type="password"
+            id="apiKey"
+            placeholder="sk-ant-..."
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+          <button type="button" id="saveKey">Uložit</button>
+        </div>
+        <div id="keyStatus" class="keystatus"></div>
+      </details>
+
+      <form id="form">
+        <input
+          type="file"
+          id="camera"
+          accept="image/*"
+          capture="environment"
+          hidden
+        />
+        <input type="file" id="gallery" accept="image/*" hidden />
+
+        <div class="pick">
+          <button type="button" id="cameraBtn" class="big">📷 Vyfotit jídlo</button>
+          <button type="button" id="galleryBtn" class="ghost">
+            🖼 Vybrat z galerie
+          </button>
+        </div>
+
+        <img id="preview" alt="Náhled fotografie" hidden />
+
+        <label class="field">
+          <span>Upřesnění (volitelné)</span>
+          <textarea
+            id="upresneni"
+            rows="2"
+            placeholder="např. kuřecí prsa 150 g, rýže basmati 200 g, bez dresinku"
+          ></textarea>
+        </label>
+
+        <button type="submit" id="submit" disabled>Analyzovat</button>
+      </form>
+
+      <div id="status" class="status" hidden></div>
+      <section id="results" hidden></section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
