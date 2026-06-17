@@ -3,6 +3,7 @@ const API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-8";
 const MAX_LONG_EDGE = 1568; // px — delší hrana fotky
 const KEY_STORAGE = "anthropic_api_key";
+const MEALS_KEY = "meals_log_v1";
 
 const SYSTEM_PROMPT = `Jsi expert na výživu a analýzu jídla z fotografií. Tvým úkolem je z přiložené
 fotografie identifikovat jídlo a odhadnout jeho kalorickou a nutriční hodnotu.
@@ -105,10 +106,14 @@ const settings = document.getElementById("settings");
 const apiKeyEl = document.getElementById("apiKey");
 const saveKeyBtn = document.getElementById("saveKey");
 const keyStatus = document.getElementById("keyStatus");
+const diaryBody = document.getElementById("diaryBody");
+const exportCsvBtn = document.getElementById("exportCsv");
+const exportJsonBtn = document.getElementById("exportJson");
 
 const JISTOTA_CLASS = { vysoká: "high", střední: "mid", nízká: "low" };
 
 let selectedFile = null;
+let lastResult = null;
 
 // === Klíč ===
 function getKey() {
@@ -278,6 +283,7 @@ form.addEventListener("submit", async (event) => {
       throw new Error("Odpověď modelu nešla přečíst jako JSON.");
     }
 
+    lastResult = data;
     renderResults(data);
     clearStatus();
   } catch (err) {
@@ -358,8 +364,17 @@ function renderResults(data) {
     html += `<p class="poznamka">📝 ${escapeHtml(data.poznamka)}</p>`;
   }
 
+  html += `<button type="button" id="addMeal" class="big addmeal">➕ Přidat do deníku</button>`;
+
   resultsEl.innerHTML = html;
   resultsEl.hidden = false;
+
+  const addBtn = document.getElementById("addMeal");
+  addBtn.addEventListener("click", () => {
+    addMealToDiary(lastResult);
+    addBtn.textContent = "✓ Přidáno do deníku";
+    addBtn.disabled = true;
+  });
 }
 
 function escapeHtml(value) {
@@ -371,3 +386,195 @@ function escapeHtml(value) {
       ])
   );
 }
+
+// === Deník jídel (localStorage) ===
+function loadMeals() {
+  try {
+    return JSON.parse(localStorage.getItem(MEALS_KEY) || "[]");
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveMeals(meals) {
+  localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
+}
+
+function addMealToDiary(data) {
+  if (!data) return;
+  const meals = loadMeals();
+  const nazev = (data.polozky || []).map((p) => p.nazev).join(", ") || "Jídlo";
+  meals.push({
+    id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+    ts: new Date().toISOString(),
+    nazev,
+    celkem: data.celkem || {
+      kalorie_kcal: 0,
+      bilkoviny_g: 0,
+      sacharidy_g: 0,
+      tuky_g: 0,
+    },
+    polozky: data.polozky || [],
+  });
+  saveMeals(meals);
+  renderDiary();
+}
+
+function deleteMeal(id) {
+  saveMeals(loadMeals().filter((m) => m.id !== id));
+  renderDiary();
+}
+
+function dayKey(ts) {
+  const d = new Date(ts);
+  return (
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0")
+  );
+}
+
+function fmtDay(key) {
+  if (key === dayKey(new Date().toISOString())) return "Dnes";
+  const [y, m, d] = key.split("-");
+  return `${+d}. ${+m}. ${y}`;
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return (
+    String(d.getHours()).padStart(2, "0") +
+    ":" +
+    String(d.getMinutes()).padStart(2, "0")
+  );
+}
+
+function renderDiary() {
+  const meals = loadMeals();
+  if (meals.length === 0) {
+    diaryBody.innerHTML =
+      '<p class="empty">Zatím žádné záznamy. Po analýze klepni na „Přidat do deníku".</p>';
+    return;
+  }
+
+  const byDay = {};
+  meals.forEach((m) => {
+    const k = dayKey(m.ts);
+    (byDay[k] = byDay[k] || []).push(m);
+  });
+
+  const days = Object.keys(byDay).sort().reverse();
+  diaryBody.innerHTML = days
+    .map((key) => {
+      const items = byDay[key].slice().sort((a, b) => b.ts.localeCompare(a.ts));
+      const sum = items.reduce(
+        (acc, m) => {
+          acc.k += m.celkem.kalorie_kcal || 0;
+          acc.b += m.celkem.bilkoviny_g || 0;
+          acc.s += m.celkem.sacharidy_g || 0;
+          acc.t += m.celkem.tuky_g || 0;
+          return acc;
+        },
+        { k: 0, b: 0, s: 0, t: 0 }
+      );
+      const mealRows = items
+        .map(
+          (m) => `
+        <div class="meal">
+          <span class="meal-time">${fmtTime(m.ts)}</span>
+          <span class="meal-name">${escapeHtml(m.nazev)}</span>
+          <span class="meal-kcal">${m.celkem.kalorie_kcal || 0} kcal</span>
+          <button type="button" class="del" data-id="${m.id}" aria-label="Smazat">✕</button>
+        </div>`
+        )
+        .join("");
+      return `
+        <div class="day">
+          <div class="day-head"><span>${fmtDay(key)}</span><strong>${sum.k} kcal</strong></div>
+          <div class="day-macros">B ${sum.b} g · S ${sum.s} g · T ${sum.t} g · ${items.length}× jídlo</div>
+          ${mealRows}
+        </div>`;
+    })
+    .join("");
+
+  diaryBody.querySelectorAll(".del").forEach((btn) =>
+    btn.addEventListener("click", () => deleteMeal(btn.dataset.id))
+  );
+}
+
+// === Export ===
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function csvCell(value) {
+  const s = String(value);
+  return /[";\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportCsv() {
+  const meals = loadMeals()
+    .slice()
+    .sort((a, b) => a.ts.localeCompare(b.ts));
+  if (meals.length === 0) {
+    setStatus("Deník je prázdný — není co exportovat.", "error");
+    return;
+  }
+  const head = [
+    "datum",
+    "cas",
+    "nazev",
+    "kalorie_kcal",
+    "bilkoviny_g",
+    "sacharidy_g",
+    "tuky_g",
+  ];
+  const rows = meals.map((m) =>
+    [
+      dayKey(m.ts),
+      fmtTime(m.ts),
+      m.nazev,
+      m.celkem.kalorie_kcal || 0,
+      m.celkem.bilkoviny_g || 0,
+      m.celkem.sacharidy_g || 0,
+      m.celkem.tuky_g || 0,
+    ]
+      .map(csvCell)
+      .join(";")
+  );
+  // BOM kvůli správné diakritice v Excelu; ";" oddělovač pro český Excel
+  const csv = "﻿" + [head.join(";"), ...rows].join("\r\n");
+  download(
+    `kalorie-${dayKey(new Date().toISOString())}.csv`,
+    csv,
+    "text/csv;charset=utf-8"
+  );
+}
+
+function exportJson() {
+  const meals = loadMeals();
+  if (meals.length === 0) {
+    setStatus("Deník je prázdný — není co exportovat.", "error");
+    return;
+  }
+  download(
+    `kalorie-${dayKey(new Date().toISOString())}.json`,
+    JSON.stringify(meals, null, 2),
+    "application/json"
+  );
+}
+
+exportCsvBtn.addEventListener("click", exportCsv);
+exportJsonBtn.addEventListener("click", exportJson);
+
+renderDiary();

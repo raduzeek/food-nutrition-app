@@ -13,7 +13,7 @@
     <link rel="apple-touch-icon" href="icon-180.png" />
     <link rel="manifest" href="manifest.json" />
     <title>Kalorie z fotky</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=2" />
   </head>
   <body>
     <main>
@@ -78,8 +78,19 @@
 
       <div id="status" class="status" hidden></div>
       <section id="results" hidden></section>
+
+      <section id="diary" class="diary">
+        <div class="diary-head">
+          <h2>📖 Deník jídel</h2>
+          <div class="diary-actions">
+            <button type="button" id="exportCsv" class="ghost small">⤓ CSV</button>
+            <button type="button" id="exportJson" class="ghost small">⤓ JSON</button>
+          </div>
+        </div>
+        <div id="diaryBody"></div>
+      </section>
     </main>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
   </body>
 </html>
