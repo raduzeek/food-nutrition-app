@@ -49,7 +49,7 @@ def sync_job():
 
 def main():
     logger = setup_logging()
-    logger.info("Fitbit→Garmin sync starting")
+    logger.info("Fitbit/Google→Garmin sync starting")
     logger.info(f"Sync interval: {SYNC_INTERVAL} seconds")
 
     scheduler = BlockingScheduler(timezone=TIMEZONE)

@@ -1,12 +1,9 @@
 import json
 import os
 import time
-import hashlib
-import base64
-import secrets
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import urlencode
 
 import requests
 import pytz
@@ -15,9 +12,10 @@ from garminconnect import Garmin
 logger = logging.getLogger("fitbit-garmin-sync")
 
 CONFIG_PATH = "/app/data/config.json"
-FITBIT_AUTH_URL = "https://www.fitbit.com/oauth2/authorize"
-FITBIT_TOKEN_URL = "https://api.fitbit.com/oauth2/token"
-FITBIT_API_BASE = "https://api.fitbit.com"
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_HEALTH_API = "https://health.googleapis.com/v4"
+GOOGLE_HEALTH_SCOPE = "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly"
 REDIRECT_URI = "http://localhost:8080/callback"
 TIMEZONE = pytz.timezone(os.environ.get("TZ", "Europe/Prague"))
 
@@ -57,142 +55,179 @@ def retry_request(func, *args, **kwargs):
     return None
 
 
-def generate_pkce():
-    code_verifier = secrets.token_urlsafe(64)[:128]
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return code_verifier, code_challenge
-
-
-def get_fitbit_auth_url(client_id, code_challenge):
+def get_google_auth_url(client_id):
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": REDIRECT_URI,
-        "scope": "weight",
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
+        "scope": GOOGLE_HEALTH_SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
     }
-    return f"{FITBIT_AUTH_URL}?{urlencode(params)}"
+    return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
 
-def exchange_fitbit_code(client_id, auth_code, code_verifier):
+def exchange_google_code(client_id, client_secret, auth_code):
     data = {
         "grant_type": "authorization_code",
         "code": auth_code,
         "redirect_uri": REDIRECT_URI,
         "client_id": client_id,
-        "code_verifier": code_verifier,
+        "client_secret": client_secret,
     }
-    resp = requests.post(FITBIT_TOKEN_URL, data=data, headers={
-        "Content-Type": "application/x-www-form-urlencoded",
-    })
+    resp = requests.post(GOOGLE_TOKEN_URL, data=data)
     resp.raise_for_status()
     return resp.json()
 
 
-def refresh_fitbit_token(client_id, refresh_token):
+def refresh_google_token(client_id, client_secret, refresh_token):
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
         "client_id": client_id,
+        "client_secret": client_secret,
     }
-    resp = requests.post(FITBIT_TOKEN_URL, data=data, headers={
-        "Content-Type": "application/x-www-form-urlencoded",
-    })
+    resp = requests.post(GOOGLE_TOKEN_URL, data=data)
     resp.raise_for_status()
     return resp.json()
 
 
-def ensure_fitbit_auth(config):
-    client_id = os.environ.get("FITBIT_CLIENT_ID", config.get("fitbit_client_id", ""))
-    auth_code = os.environ.get("FITBIT_AUTH_CODE", "")
+def ensure_google_auth(config):
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", config.get("google_client_id", ""))
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", config.get("google_client_secret", ""))
+    auth_code = os.environ.get("GOOGLE_AUTH_CODE", "")
 
-    if not client_id:
-        logger.error("FITBIT_CLIENT_ID not set")
+    if not client_id or not client_secret:
+        logger.error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
         return None
 
-    config["fitbit_client_id"] = client_id
+    config["google_client_id"] = client_id
+    config["google_client_secret"] = client_secret
 
-    if config.get("fitbit_access_token") and config.get("fitbit_token_expires_at"):
-        expires_at = datetime.fromisoformat(config["fitbit_token_expires_at"])
+    if config.get("google_access_token") and config.get("google_token_expires_at"):
+        expires_at = datetime.fromisoformat(config["google_token_expires_at"])
         if datetime.now(tz=pytz.utc) < expires_at - timedelta(minutes=5):
             return config
 
-        logger.info("Fitbit token expired, refreshing...")
+        logger.info("Google token expired, refreshing...")
         try:
-            token_data = refresh_fitbit_token(client_id, config["fitbit_refresh_token"])
-            config["fitbit_access_token"] = token_data["access_token"]
-            config["fitbit_refresh_token"] = token_data["refresh_token"]
-            config["fitbit_token_expires_at"] = (
+            token_data = refresh_google_token(client_id, client_secret, config["google_refresh_token"])
+            config["google_access_token"] = token_data["access_token"]
+            if "refresh_token" in token_data:
+                config["google_refresh_token"] = token_data["refresh_token"]
+            config["google_token_expires_at"] = (
                 datetime.now(tz=pytz.utc) + timedelta(seconds=token_data["expires_in"])
             ).isoformat()
             save_config(config)
-            logger.info("Fitbit token refreshed successfully")
+            logger.info("Google token refreshed successfully")
             return config
         except Exception as e:
             logger.error(f"Token refresh failed: {e}")
-            config.pop("fitbit_access_token", None)
+            config.pop("google_access_token", None)
 
     if auth_code:
-        code_verifier = config.get("fitbit_code_verifier")
-        if not code_verifier:
-            logger.error("No code_verifier found in config. Restart the container to generate a new auth URL.")
-            return None
         try:
-            token_data = exchange_fitbit_code(client_id, auth_code, code_verifier)
-            config["fitbit_access_token"] = token_data["access_token"]
-            config["fitbit_refresh_token"] = token_data["refresh_token"]
-            config["fitbit_token_expires_at"] = (
+            token_data = exchange_google_code(client_id, client_secret, auth_code)
+            config["google_access_token"] = token_data["access_token"]
+            config["google_refresh_token"] = token_data["refresh_token"]
+            config["google_token_expires_at"] = (
                 datetime.now(tz=pytz.utc) + timedelta(seconds=token_data["expires_in"])
             ).isoformat()
-            config.pop("fitbit_code_verifier", None)
             save_config(config)
-            logger.info("Fitbit OAuth authorization successful")
+            logger.info("Google OAuth authorization successful")
             return config
         except Exception as e:
-            logger.error(f"Fitbit code exchange failed: {e}")
+            logger.error(f"Google code exchange failed: {e}")
             return None
 
-    code_verifier, code_challenge = generate_pkce()
-    config["fitbit_code_verifier"] = code_verifier
-    save_config(config)
-
-    auth_url = get_fitbit_auth_url(client_id, code_challenge)
+    auth_url = get_google_auth_url(client_id)
     logger.info("=" * 70)
-    logger.info("FITBIT AUTHORIZATION REQUIRED")
+    logger.info("GOOGLE HEALTH API AUTHORIZATION REQUIRED")
     logger.info("Open this URL in your browser:")
     logger.info(auth_url)
     logger.info("")
     logger.info("After authorizing, copy the 'code' parameter from the callback URL.")
-    logger.info("Then set FITBIT_AUTH_CODE=<code> in your docker-compose.yml and restart.")
+    logger.info("Then set GOOGLE_AUTH_CODE=<code> in docker-compose.yml and restart.")
     logger.info("=" * 70)
     return None
 
 
-def fetch_fitbit_weight(config, start_date, end_date):
-    access_token = config["fitbit_access_token"]
-    headers = {"Authorization": f"Bearer {access_token}"}
+def fetch_weight_data(config, start_date, end_date):
+    access_token = config["google_access_token"]
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
     all_entries = []
 
-    current = start_date
-    while current <= end_date:
-        chunk_end = min(current + timedelta(days=29), end_date)
-        url = f"{FITBIT_API_BASE}/1/user/-/body/log/weight/date/{current.strftime('%Y-%m-%d')}/30d.json"
+    start_iso = f"{start_date.isoformat()}T00:00:00Z"
+    end_iso = f"{end_date.isoformat()}T23:59:59Z"
 
-        resp = retry_request(requests.get, url, headers=headers)
-        if resp is None or resp.status_code != 200:
-            logger.error(f"Fitbit API error: {resp.status_code if resp else 'no response'}")
-            if resp and resp.status_code == 401:
-                raise Exception("Fitbit token invalid")
-            break
+    for data_type in ("weight", "body-fat"):
+        url = f"{GOOGLE_HEALTH_API}/users/me/dataTypes/{data_type}/dataPoints"
+        params = {
+            "page_size": 1000,
+            "filter": f'data_type.interval.start_time >= "{start_iso}" AND data_type.interval.start_time <= "{end_iso}"',
+        }
+        page_token = None
 
-        data = resp.json()
-        entries = data.get("weight", [])
-        all_entries.extend(entries)
-        current = chunk_end + timedelta(days=1)
+        while True:
+            if page_token:
+                params["page_token"] = page_token
 
-    return all_entries
+            resp = retry_request(requests.get, url, headers=headers, params=params)
+            if resp is None or resp.status_code != 200:
+                logger.error(f"Google Health API error ({data_type}): {resp.status_code if resp else 'no response'}")
+                if resp and resp.status_code == 401:
+                    raise Exception("Google token invalid")
+                break
+
+            data = resp.json()
+            for point in data.get("dataPoints", []):
+                all_entries.append({"_type": data_type, "_raw": point})
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+    return _merge_entries(all_entries)
+
+
+def _merge_entries(raw_entries):
+    by_date = {}
+
+    for item in raw_entries:
+        data_type = item["_type"]
+        point = item["_raw"]
+
+        timestamp = point.get("startTime") or point.get("time", "")
+        try:
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            date_str = dt.astimezone(TIMEZONE).strftime("%Y-%m-%d")
+            time_str = dt.astimezone(TIMEZONE).strftime("%H:%M:%S")
+        except (ValueError, AttributeError):
+            continue
+
+        if date_str not in by_date:
+            by_date[date_str] = {"date": date_str, "time": time_str}
+
+        values = point.get("values", point.get("value", {}))
+        if isinstance(values, list) and values:
+            values = values[0]
+
+        if data_type == "weight":
+            weight_val = values.get("fpVal") or values.get("value")
+            if weight_val is not None:
+                by_date[date_str]["weight"] = round(float(weight_val), 1)
+                height = by_date[date_str].get("_height")
+                if height:
+                    by_date[date_str]["bmi"] = round(float(weight_val) / (height ** 2), 1)
+        elif data_type == "body-fat":
+            fat_val = values.get("fpVal") or values.get("value")
+            if fat_val is not None:
+                by_date[date_str]["fat"] = round(float(fat_val), 1)
+
+    return list(by_date.values())
 
 
 def connect_garmin(config):
@@ -268,7 +303,7 @@ def upload_to_garmin(garmin, entry):
 def run_sync():
     config = load_config()
 
-    config = ensure_fitbit_auth(config)
+    config = ensure_google_auth(config)
     if config is None:
         return {"fetched": 0, "uploaded": 0, "skipped": 0, "errors": 0}
 
@@ -291,12 +326,12 @@ def run_sync():
     logger.info(f"Starting sync from {start_date} to {end_date}")
 
     try:
-        entries = fetch_fitbit_weight(config, start_date, end_date)
+        entries = fetch_weight_data(config, start_date, end_date)
     except Exception as e:
-        logger.error(f"Failed to fetch Fitbit data: {e}")
+        logger.error(f"Failed to fetch data from Google Health API: {e}")
         return {"fetched": 0, "uploaded": 0, "skipped": 0, "errors": 1}
 
-    logger.info(f"Fetched {len(entries)} entries from Fitbit")
+    logger.info(f"Fetched {len(entries)} entries from Google Health API")
 
     existing_dates = get_existing_garmin_dates(garmin, start_date, end_date)
 
