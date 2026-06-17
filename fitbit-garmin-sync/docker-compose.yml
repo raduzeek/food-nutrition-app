@@ -1,0 +1,16 @@
+services:
+  fitbit-garmin-sync:
+    build: .
+    container_name: fitbit-garmin-sync
+    restart: unless-stopped
+    volumes:
+      - /volume1/docker/fitbit-garmin-sync/data:/app/data
+    environment:
+      - FITBIT_CLIENT_ID=your_client_id_here
+      - FITBIT_CLIENT_SECRET=your_client_secret_here
+      - GARMIN_EMAIL=your_garmin_email
+      - GARMIN_PASSWORD=your_garmin_password
+      - SYNC_INTERVAL_SECONDS=3600
+      - TZ=Europe/Prague
+      # Set this on first run after visiting the auth URL, then remove it:
+      # - FITBIT_AUTH_CODE=paste_code_here
