@@ -111,6 +111,11 @@ const goalEl = document.getElementById("goal");
 const diaryBody = document.getElementById("diaryBody");
 const exportCsvBtn = document.getElementById("exportCsv");
 const exportJsonBtn = document.getElementById("exportJson");
+const overviewBody = document.getElementById("overviewBody");
+const periodTabs = document.querySelectorAll(".period-tab");
+const customRange = document.getElementById("customRange");
+const rangeFrom = document.getElementById("rangeFrom");
+const rangeTo = document.getElementById("rangeTo");
 
 const JISTOTA_CLASS = { vysoká: "high", střední: "mid", nízká: "low" };
 
@@ -118,6 +123,7 @@ let selectedFile = null;
 let lastResult = null;
 let lastFile = null;
 let editingId = null;
+let currentPeriod = "7";
 
 // === Klíč ===
 function getKey() {
@@ -162,7 +168,7 @@ goalEl.addEventListener("change", () => {
   const v = parseInt(goalEl.value, 10);
   if (Number.isFinite(v) && v > 0) localStorage.setItem(GOAL_KEY, String(v));
   else localStorage.removeItem(GOAL_KEY);
-  renderDiary();
+  refreshViews();
 });
 
 // === Výběr fotky ===
@@ -484,12 +490,12 @@ async function addMealToDiary(data, file) {
       return;
     }
   }
-  renderDiary();
+  refreshViews();
 }
 
 function deleteMeal(id) {
   saveMeals(loadMeals().filter((m) => m.id !== id));
-  renderDiary();
+  refreshViews();
 }
 
 function dayKey(ts) {
@@ -663,7 +669,7 @@ function renderDiary() {
         saveMeals(list);
       }
       editingId = null;
-      renderDiary();
+      refreshViews();
     })
   );
 }
@@ -744,4 +750,158 @@ function exportJson() {
 exportCsvBtn.addEventListener("click", exportCsv);
 exportJsonBtn.addEventListener("click", exportJson);
 
-renderDiary();
+// === Přehled (týden / měsíc / vlastní rozsah) ===
+function rangeForPeriod() {
+  const todayKey = dayKey(new Date().toISOString());
+  if (currentPeriod === "custom") {
+    const f = rangeFrom.value || todayKey;
+    const t = rangeTo.value || todayKey;
+    return f <= t ? { from: f, to: t } : { from: t, to: f };
+  }
+  const n = currentPeriod === "30" ? 30 : 7;
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(today.getDate() - (n - 1));
+  return { from: dayKey(from.toISOString()), to: todayKey };
+}
+
+function fmtDayShort(key) {
+  const [, m, d] = key.split("-");
+  return `${+d}. ${+m}.`;
+}
+
+function eachDay(fromKey, toKey, cb) {
+  const d = new Date(fromKey + "T00:00:00");
+  const end = new Date(toKey + "T00:00:00");
+  let guard = 0;
+  while (d <= end && guard < 1000) {
+    cb(dayKey(d.toISOString()));
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+}
+
+function renderOverview() {
+  const { from, to } = rangeForPeriod();
+  const goal = getGoal();
+
+  const byDay = {};
+  loadMeals().forEach((m) => {
+    const k = dayKey(m.ts);
+    if (k < from || k > to) return;
+    const e = (byDay[k] = byDay[k] || { k: 0, b: 0, s: 0, t: 0 });
+    e.k += m.celkem.kalorie_kcal || 0;
+    e.b += m.celkem.bilkoviny_g || 0;
+    e.s += m.celkem.sacharidy_g || 0;
+    e.t += m.celkem.tuky_g || 0;
+  });
+
+  const keys = Object.keys(byDay);
+  const rangeLabel = `${fmtDayShort(from)} – ${fmtDayShort(to)} ${to.split("-")[0]}`;
+
+  if (keys.length === 0) {
+    overviewBody.innerHTML = `<div class="ov-range">${rangeLabel}</div><p class="empty">Žádné záznamy v tomto období.</p>`;
+    return;
+  }
+
+  let totalK = 0,
+    totalB = 0,
+    totalS = 0,
+    totalT = 0,
+    inGoal = 0,
+    maxK = 0;
+  keys.forEach((k) => {
+    const e = byDay[k];
+    totalK += e.k;
+    totalB += e.b;
+    totalS += e.s;
+    totalT += e.t;
+    if (e.k > maxK) maxK = e.k;
+    if (goal > 0 && e.k <= goal) inGoal++;
+  });
+  const nDays = keys.length;
+  const avg = Math.round(totalK / nDays);
+
+  let html = `<div class="ov-range">${rangeLabel}</div>`;
+  html += `
+    <div class="ov-stats">
+      <div><span>Ø kcal/den</span><strong>${avg}</strong></div>
+      <div><span>Dní se záznamem</span><strong>${nDays}</strong></div>
+      <div><span>Celkem</span><strong>${totalK} kcal</strong></div>
+      <div><span>Ø makra/den</span><strong>B ${Math.round(
+        totalB / nDays
+      )} · S ${Math.round(totalS / nDays)} · T ${Math.round(
+    totalT / nDays
+  )} g</strong></div>
+    </div>`;
+
+  if (goal > 0) {
+    const pctGoal = Math.round((avg / goal) * 100);
+    html += `<div class="ov-goal">V cíli (≤ ${goal} kcal): <strong>${inGoal} z ${nDays} dní</strong> · průměr ${pctGoal} % cíle</div>`;
+  }
+
+  const allDays = [];
+  eachDay(from, to, (k) => allDays.push(k));
+  if (allDays.length <= 92) {
+    const scaleMax = Math.max(maxK, goal || 0, 1);
+    const showLabels = allDays.length <= 10;
+    const bars = allDays
+      .map((k) => {
+        const v = byDay[k] ? byDay[k].k : 0;
+        const h = Math.round((v / scaleMax) * 100);
+        const over = goal > 0 && v > goal;
+        return `<div class="bar${
+          over ? " over" : ""
+        }" style="height:${h}%" title="${fmtDayShort(k)}: ${v} kcal"></div>`;
+      })
+      .join("");
+    const goalLine =
+      goal > 0
+        ? `<div class="chart-goal" style="bottom:${Math.min(
+            100,
+            (goal / scaleMax) * 100
+          )}%"></div>`
+        : "";
+    html += `<div class="chart">${goalLine}<div class="bars">${bars}</div></div>`;
+    if (showLabels) {
+      html += `<div class="chart-labels">${allDays
+        .map((k) => `<span>${+k.split("-")[2]}.</span>`)
+        .join("")}</div>`;
+    }
+  } else {
+    html += `<p class="hint">Graf se nezobrazuje pro rozsah delší než 92 dní.</p>`;
+  }
+
+  overviewBody.innerHTML = html;
+}
+
+function refreshViews() {
+  renderDiary();
+  renderOverview();
+}
+
+periodTabs.forEach((tab) =>
+  tab.addEventListener("click", () => {
+    currentPeriod = tab.dataset.period;
+    periodTabs.forEach((t) => t.classList.toggle("active", t === tab));
+    if (currentPeriod === "custom") {
+      customRange.hidden = false;
+      if (!rangeFrom.value || !rangeTo.value) {
+        const today = new Date();
+        const from = new Date(today);
+        from.setDate(today.getDate() - 6);
+        rangeFrom.value = dayKey(from.toISOString());
+        rangeTo.value = dayKey(today.toISOString());
+      }
+    } else {
+      customRange.hidden = true;
+    }
+    renderOverview();
+  })
+);
+
+[rangeFrom, rangeTo].forEach((el) =>
+  el.addEventListener("change", renderOverview)
+);
+
+refreshViews();

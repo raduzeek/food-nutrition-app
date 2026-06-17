@@ -13,7 +13,7 @@
     <link rel="apple-touch-icon" href="icon-180.png" />
     <link rel="manifest" href="manifest.json" />
     <title>Kalorie z fotky</title>
-    <link rel="stylesheet" href="style.css?v=3" />
+    <link rel="stylesheet" href="style.css?v=4" />
   </head>
   <body>
     <main>
@@ -91,6 +91,22 @@
       <div id="status" class="status" hidden></div>
       <section id="results" hidden></section>
 
+      <section id="overview" class="overview">
+        <div class="overview-head">
+          <h2>📊 Přehled</h2>
+          <div class="period-tabs">
+            <button type="button" class="period-tab active" data-period="7">Týden</button>
+            <button type="button" class="period-tab" data-period="30">Měsíc</button>
+            <button type="button" class="period-tab" data-period="custom">Vlastní</button>
+          </div>
+        </div>
+        <div id="customRange" class="custom-range" hidden>
+          <label>Od<input type="date" id="rangeFrom" /></label>
+          <label>Do<input type="date" id="rangeTo" /></label>
+        </div>
+        <div id="overviewBody"></div>
+      </section>
+
       <section id="diary" class="diary">
         <div class="diary-head">
           <h2>📖 Deník jídel</h2>
@@ -103,6 +119,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>

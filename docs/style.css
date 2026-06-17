@@ -527,6 +527,158 @@ button.small {
   margin-top: 0.5rem;
 }
 
+/* === Přehled === */
+.overview {
+  margin-top: 2rem;
+}
+
+.overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.overview-head h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.period-tabs {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.period-tab {
+  min-height: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.period-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.custom-range {
+  display: flex;
+  gap: 0.8rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.custom-range label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.custom-range input {
+  font: inherit;
+  font-size: 16px;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ov-range {
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.ov-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+}
+
+.ov-stats > div {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+}
+
+.ov-stats span {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.ov-stats strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-top: 0.1rem;
+}
+
+.ov-goal {
+  margin-top: 0.7rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ov-goal strong {
+  color: var(--ink);
+}
+
+.chart {
+  position: relative;
+  height: 120px;
+  margin-top: 1rem;
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+}
+
+.bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+}
+
+.bar.over {
+  background: #c0392b;
+}
+
+.chart-goal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed #1d7a45;
+  pointer-events: none;
+}
+
+.chart-labels {
+  display: flex;
+  gap: 2px;
+  margin-top: 0.25rem;
+}
+
+.chart-labels span {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
 @media (max-width: 560px) {
   h1 {
     font-size: 1.4rem;
