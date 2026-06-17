@@ -1,9 +1,11 @@
 // === Konfigurace ===
 const API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-8";
-const MAX_LONG_EDGE = 1568; // px — delší hrana fotky
+const MAX_LONG_EDGE = 1568; // px — delší hrana fotky pro analýzu
 const KEY_STORAGE = "anthropic_api_key";
 const MEALS_KEY = "meals_log_v1";
+const GOAL_KEY = "daily_goal_kcal";
+const CELKEM_FIELDS = ["kalorie_kcal", "bilkoviny_g", "sacharidy_g", "tuky_g"];
 
 const SYSTEM_PROMPT = `Jsi expert na výživu a analýzu jídla z fotografií. Tvým úkolem je z přiložené
 fotografie identifikovat jídlo a odhadnout jeho kalorickou a nutriční hodnotu.
@@ -34,7 +36,6 @@ PRAVIDLA:
 - Pokud fotografie neobsahuje jídlo, vrať prázdné pole "polozky" a vysvětli to v "poznamka".
 - Veškeré textové hodnoty piš v češtině.`;
 
-// JSON schéma pro structured outputs (zrcadlí požadovaný tvar)
 const JISTOTA_ENUM = ["vysoká", "střední", "nízká"];
 const SCHEMA = {
   type: "object",
@@ -106,6 +107,7 @@ const settings = document.getElementById("settings");
 const apiKeyEl = document.getElementById("apiKey");
 const saveKeyBtn = document.getElementById("saveKey");
 const keyStatus = document.getElementById("keyStatus");
+const goalEl = document.getElementById("goal");
 const diaryBody = document.getElementById("diaryBody");
 const exportCsvBtn = document.getElementById("exportCsv");
 const exportJsonBtn = document.getElementById("exportJson");
@@ -114,6 +116,8 @@ const JISTOTA_CLASS = { vysoká: "high", střední: "mid", nízká: "low" };
 
 let selectedFile = null;
 let lastResult = null;
+let lastFile = null;
+let editingId = null;
 
 // === Klíč ===
 function getKey() {
@@ -147,6 +151,20 @@ saveKeyBtn.addEventListener("click", () => {
 
 refreshKeyStatus();
 
+// === Denní cíl ===
+function getGoal() {
+  const v = parseInt(localStorage.getItem(GOAL_KEY) || "", 10);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+goalEl.value = getGoal() || "";
+goalEl.addEventListener("change", () => {
+  const v = parseInt(goalEl.value, 10);
+  if (Number.isFinite(v) && v > 0) localStorage.setItem(GOAL_KEY, String(v));
+  else localStorage.removeItem(GOAL_KEY);
+  renderDiary();
+});
+
 // === Výběr fotky ===
 cameraBtn.addEventListener("click", () => cameraInput.click());
 galleryBtn.addEventListener("click", () => galleryInput.click());
@@ -164,7 +182,7 @@ galleryBtn.addEventListener("click", () => galleryInput.click());
   })
 );
 
-// === Zmenšení fotky v prohlížeči → base64 JPEG ===
+// === Práce s obrázkem ===
 async function loadBitmap(file) {
   // createImageBitmap s 'from-image' respektuje EXIF rotaci (fotky z telefonu)
   try {
@@ -181,21 +199,35 @@ async function loadBitmap(file) {
 
 async function imageToBase64(file) {
   const bitmap = await loadBitmap(file);
-  const sw = bitmap.width;
-  const sh = bitmap.height;
-  const longest = Math.max(sw, sh);
+  const longest = Math.max(bitmap.width, bitmap.height);
   const scale = longest > MAX_LONG_EDGE ? MAX_LONG_EDGE / longest : 1;
-  const w = Math.round(sw * scale);
-  const h = Math.round(sh * scale);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
 
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, 0, 0, w, h);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
 
   const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
   return dataUrl.split(",")[1]; // ořízne "data:image/jpeg;base64,"
+}
+
+async function makeThumbnail(file, maxEdge = 160) {
+  try {
+    const bitmap = await loadBitmap(file);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const scale = longest > maxEdge ? maxEdge / longest : 1;
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.7); // celý data URL pro <img>
+  } catch (_) {
+    return null;
+  }
 }
 
 // === Analýza ===
@@ -205,7 +237,7 @@ form.addEventListener("submit", async (event) => {
 
   const key = getKey();
   if (!key) {
-    setStatus("Nejdřív ulož API klíč (sekce 🔑 nahoře).", "error");
+    setStatus("Nejdřív ulož API klíč (sekce ⚙️ Nastavení nahoře).", "error");
     settings.open = true;
     return;
   }
@@ -284,6 +316,7 @@ form.addEventListener("submit", async (event) => {
     }
 
     lastResult = data;
+    lastFile = selectedFile;
     renderResults(data);
     clearStatus();
   } catch (err) {
@@ -370,10 +403,11 @@ function renderResults(data) {
   resultsEl.hidden = false;
 
   const addBtn = document.getElementById("addMeal");
-  addBtn.addEventListener("click", () => {
-    addMealToDiary(lastResult);
-    addBtn.textContent = "✓ Přidáno do deníku";
+  addBtn.addEventListener("click", async () => {
     addBtn.disabled = true;
+    addBtn.textContent = "Ukládám…";
+    await addMealToDiary(lastResult, lastFile);
+    addBtn.textContent = "✓ Přidáno do deníku";
   });
 }
 
@@ -384,6 +418,13 @@ function escapeHtml(value) {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
         ch
       ])
+  );
+}
+
+function escapeAttr(value) {
+  return String(value).replace(
+    /[&"<]/g,
+    (ch) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;" }[ch])
   );
 }
 
@@ -400,14 +441,24 @@ function saveMeals(meals) {
   localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
 }
 
-function addMealToDiary(data) {
+function trySaveMeals(meals) {
+  try {
+    localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
+    return true;
+  } catch (_) {
+    return false; // typicky QuotaExceededError (plné úložiště)
+  }
+}
+
+async function addMealToDiary(data, file) {
   if (!data) return;
-  const meals = loadMeals();
+  const thumb = file ? await makeThumbnail(file) : null;
   const nazev = (data.polozky || []).map((p) => p.nazev).join(", ") || "Jídlo";
-  meals.push({
+  const meal = {
     id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
     ts: new Date().toISOString(),
     nazev,
+    poznamka: "",
     celkem: data.celkem || {
       kalorie_kcal: 0,
       bilkoviny_g: 0,
@@ -415,8 +466,24 @@ function addMealToDiary(data) {
       tuky_g: 0,
     },
     polozky: data.polozky || [],
-  });
-  saveMeals(meals);
+    thumb,
+  };
+
+  const meals = loadMeals();
+  meals.push(meal);
+  if (!trySaveMeals(meals)) {
+    meal.thumb = null; // úložiště plné → zkus uložit bez miniatury
+    if (trySaveMeals(meals)) {
+      setStatus("Úložiště skoro plné — záznam uložen bez miniatury.", "error");
+    } else {
+      meals.pop();
+      setStatus(
+        "Úložiště telefonu je plné. Vyexportuj deník a smaž starší záznamy.",
+        "error"
+      );
+      return;
+    }
+  }
   renderDiary();
 }
 
@@ -451,6 +518,61 @@ function fmtTime(ts) {
   );
 }
 
+function mealRowHtml(m) {
+  if (m.id === editingId) {
+    return `
+      <div class="meal editing">
+        <div class="edit-grid">
+          <label>Název<input type="text" class="ef" data-f="nazev" value="${escapeAttr(
+            m.nazev
+          )}" /></label>
+          <label>Kalorie<input type="number" inputmode="numeric" class="ef" data-f="kalorie_kcal" value="${
+            m.celkem.kalorie_kcal || 0
+          }" /></label>
+          <label>Bílkoviny (g)<input type="number" inputmode="numeric" class="ef" data-f="bilkoviny_g" value="${
+            m.celkem.bilkoviny_g || 0
+          }" /></label>
+          <label>Sacharidy (g)<input type="number" inputmode="numeric" class="ef" data-f="sacharidy_g" value="${
+            m.celkem.sacharidy_g || 0
+          }" /></label>
+          <label>Tuky (g)<input type="number" inputmode="numeric" class="ef" data-f="tuky_g" value="${
+            m.celkem.tuky_g || 0
+          }" /></label>
+          <label class="wide">Poznámka<input type="text" class="ef" data-f="poznamka" value="${escapeAttr(
+            m.poznamka || ""
+          )}" /></label>
+        </div>
+        <div class="edit-actions">
+          <button type="button" class="save" data-id="${m.id}">Uložit</button>
+          <button type="button" class="ghost cancel">Zrušit</button>
+        </div>
+      </div>`;
+  }
+
+  const thumb = m.thumb
+    ? `<img class="meal-thumb" src="${m.thumb}" alt="" />`
+    : "";
+  const note = m.poznamka
+    ? `<div class="meal-note">${escapeHtml(m.poznamka)}</div>`
+    : "";
+  return `
+    <div class="meal">
+      ${thumb}
+      <div class="meal-main">
+        <div class="meal-line">
+          <span class="meal-time">${fmtTime(m.ts)}</span>
+          <span class="meal-name">${escapeHtml(m.nazev)}</span>
+          <span class="meal-kcal">${m.celkem.kalorie_kcal || 0} kcal</span>
+        </div>
+        ${note}
+      </div>
+      <div class="meal-btns">
+        <button type="button" class="edit" data-id="${m.id}" aria-label="Upravit">✎</button>
+        <button type="button" class="del" data-id="${m.id}" aria-label="Smazat">✕</button>
+      </div>
+    </div>`;
+}
+
 function renderDiary() {
   const meals = loadMeals();
   if (meals.length === 0) {
@@ -459,6 +581,7 @@ function renderDiary() {
     return;
   }
 
+  const goal = getGoal();
   const byDay = {};
   meals.forEach((m) => {
     const k = dayKey(m.ts);
@@ -479,28 +602,69 @@ function renderDiary() {
         },
         { k: 0, b: 0, s: 0, t: 0 }
       );
-      const mealRows = items
-        .map(
-          (m) => `
-        <div class="meal">
-          <span class="meal-time">${fmtTime(m.ts)}</span>
-          <span class="meal-name">${escapeHtml(m.nazev)}</span>
-          <span class="meal-kcal">${m.celkem.kalorie_kcal || 0} kcal</span>
-          <button type="button" class="del" data-id="${m.id}" aria-label="Smazat">✕</button>
-        </div>`
-        )
-        .join("");
+
+      let goalHtml = "";
+      if (goal > 0) {
+        const pct = Math.min(100, Math.round((sum.k / goal) * 100));
+        const remaining = goal - sum.k;
+        const over = remaining < 0;
+        const label = over
+          ? `překročeno o ${-remaining} kcal`
+          : `zbývá ${remaining} kcal`;
+        goalHtml = `
+          <div class="goalbar">
+            <div class="goalbar-track"><div class="goalbar-fill${
+              over ? " over" : ""
+            }" style="width:${pct}%"></div></div>
+            <div class="goalbar-label">${sum.k} / ${goal} kcal · ${label}</div>
+          </div>`;
+      }
+
       return `
         <div class="day">
           <div class="day-head"><span>${fmtDay(key)}</span><strong>${sum.k} kcal</strong></div>
           <div class="day-macros">B ${sum.b} g · S ${sum.s} g · T ${sum.t} g · ${items.length}× jídlo</div>
-          ${mealRows}
+          ${goalHtml}
+          ${items.map(mealRowHtml).join("")}
         </div>`;
     })
     .join("");
 
   diaryBody.querySelectorAll(".del").forEach((btn) =>
     btn.addEventListener("click", () => deleteMeal(btn.dataset.id))
+  );
+  diaryBody.querySelectorAll(".edit").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      editingId = btn.dataset.id;
+      renderDiary();
+    })
+  );
+  diaryBody.querySelectorAll(".cancel").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      editingId = null;
+      renderDiary();
+    })
+  );
+  diaryBody.querySelectorAll(".save").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id;
+      const container = btn.closest(".meal");
+      const list = loadMeals();
+      const m = list.find((x) => x.id === id);
+      if (m && container) {
+        container.querySelectorAll(".ef").forEach((inp) => {
+          const f = inp.dataset.f;
+          if (CELKEM_FIELDS.includes(f)) {
+            m.celkem[f] = parseInt(inp.value, 10) || 0;
+          } else {
+            m[f] = inp.value;
+          }
+        });
+        saveMeals(list);
+      }
+      editingId = null;
+      renderDiary();
+    })
   );
 }
 
@@ -538,6 +702,7 @@ function exportCsv() {
     "bilkoviny_g",
     "sacharidy_g",
     "tuky_g",
+    "poznamka",
   ];
   const rows = meals.map((m) =>
     [
@@ -548,11 +713,12 @@ function exportCsv() {
       m.celkem.bilkoviny_g || 0,
       m.celkem.sacharidy_g || 0,
       m.celkem.tuky_g || 0,
+      m.poznamka || "",
     ]
       .map(csvCell)
       .join(";")
   );
-  // BOM kvůli správné diakritice v Excelu; ";" oddělovač pro český Excel
+  // BOM (﻿) kvůli diakritice v Excelu; ";" oddělovač pro český Excel
   const csv = "﻿" + [head.join(";"), ...rows].join("\r\n");
   download(
     `kalorie-${dayKey(new Date().toISOString())}.csv`,
@@ -562,7 +728,8 @@ function exportCsv() {
 }
 
 function exportJson() {
-  const meals = loadMeals();
+  // miniatury vynecháme, ať je export malý
+  const meals = loadMeals().map(({ thumb, ...rest }) => rest);
   if (meals.length === 0) {
     setStatus("Deník je prázdný — není co exportovat.", "error");
     return;

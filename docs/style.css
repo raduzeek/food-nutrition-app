@@ -364,8 +364,27 @@ button.small {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.4rem 0;
+  padding: 0.5rem 0;
   border-top: 1px solid var(--line);
+}
+
+.meal-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+.meal-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.meal-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .meal-time {
@@ -387,15 +406,120 @@ button.small {
   font-weight: 600;
 }
 
-.del {
+.meal-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.meal-btns {
   flex: 0 0 auto;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.edit,
+.del {
   min-height: 0;
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.5rem;
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 8px;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+}
+
+/* ukazatel denního cíle */
+.goalbar {
+  margin: 0.1rem 0 0.6rem;
+}
+
+.goalbar-track {
+  height: 7px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.goalbar-fill {
+  height: 100%;
+  background: #1d7a45;
+  border-radius: 999px;
+}
+
+.goalbar-fill.over {
+  background: #c0392b;
+}
+
+.goalbar-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+/* inline editace záznamu */
+.meal.editing {
+  display: block;
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.edit-grid label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.edit-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.edit-grid input {
+  font: inherit;
+  font-size: 16px;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.edit-actions .save {
+  background: var(--accent);
+  color: #fff;
+  min-height: 0;
+  padding: 0.5rem 1.1rem;
+}
+
+.edit-actions .cancel {
+  min-height: 0;
+  padding: 0.5rem 1.1rem;
+}
+
+/* pole denního cíle v nastavení */
+.goalrow {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.85rem;
+  font-size: 0.85rem;
+}
+
+.goalrow input {
+  font: inherit;
+  font-size: 16px;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: 12rem;
 }
 
 .addmeal {
