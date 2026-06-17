@@ -4,7 +4,7 @@ services:
     container_name: fitbit-garmin-sync
     restart: unless-stopped
     volumes:
-      - /volume1/docker/fitbit-garmin-sync/data:/app/data
+      - /volume2/docker/fitbit-garmin-sync/data:/app/data
     environment:
       - GOOGLE_CLIENT_ID=your_google_client_id
       - GOOGLE_CLIENT_SECRET=your_google_client_secret
